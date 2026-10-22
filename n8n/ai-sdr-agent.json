@@ -1,0 +1,579 @@
+{
+  "name": "AI SDR agent (Evaboot + Claude + Instantly)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "evaboot-ai-sdr",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "0235d9bc-3c20-4411-b15e-f791f7758554",
+      "name": "New leads from Evaboot",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "d74bdea0-11ff-4581-92eb-440939c81a74"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5c966ca8-fce7-4b11-a4a9-2143ca693cf0",
+              "name": "daily_cap",
+              "type": "string",
+              "value": "20"
+            },
+            {
+              "id": "526cc935-ddc4-4cf5-9ecb-899a15cc3f07",
+              "name": "sheet_url",
+              "type": "string",
+              "value": "PASTE_YOUR_GOOGLE_SHEET_URL_WITH_GID"
+            },
+            {
+              "id": "43fcfd4e-0545-445a-85e7-8f26ac95cb92",
+              "name": "instantly_campaign_id",
+              "type": "string",
+              "value": "PASTE_YOUR_CAMPAIGN_ID"
+            },
+            {
+              "id": "9deb64a4-ba24-4f86-8e3f-7c82f82dbbd0",
+              "name": "icp",
+              "type": "string",
+              "value": "Size first: a company over 1,000 employees is a 2, whatever the role. Fit 5: VP Sales, Head of Sales, CRO, Head of SDRs or RevOps at a B2B software company of 50 to 1,000 employees with 10+ sellers or 20%+ growth in a year. 4: same role, 3 to 9 sellers, or B2B not software. 3: under 50 employees, commercial operations, or a business unit under 1,000 inside a larger group. 2: over 1,000 employees, partnerships, B2C. 1: M&A, investors, fractional or consulting roles, founders of under 10 people."
+            },
+            {
+              "id": "5dba6757-c0e8-42ba-985b-8e6cef49ea62",
+              "name": "offer",
+              "type": "string",
+              "value": "Evaboot exports a LinkedIn Sales Navigator search to a clean spreadsheet with verified professional emails; a saved search can export the new leads every week. For sales leaders who build prospect lists. Ask: a low-effort question such as 'Worth a look?'"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "64cc6e04-18d7-409e-b4ef-d3834c72a6a5",
+      "name": "Your settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Same as sdr.py facts: real fields only, plus the email-domain check.\nconst LINK_DOMAINS = ['linktr.ee', 'bit.ly', 'beacons.ai', 'lnk.bio', 'linkin.bio', 'carrd.co', 'about.me'];\nconst num = v => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isNaN(n) ? null : n; };\nconst words = s => String(s || '').split(/\\s+/).join(' ').trim();\nfunction domainNote(email, company) {\n  if (!email) return '';\n  const d = email.split('@').pop().toLowerCase(); const c = String(company || '').toLowerCase();\n  if (LINK_DOMAINS.includes(d)) return `email on ${d}, a link site: do not send`;\n  if (c && !(d === c || d.endsWith('.' + c) || c.endsWith('.' + d))) return `email domain ${d} differs from the company's ${c}: check it`;\n  return '';\n}\n// Evaboot posts one request per export, with every lead in body.prospects.\nconst prospects = $('New leads from Evaboot').first().json.body.prospects || [];\nif (!prospects.length) return [];\nconst leads = prospects.map(p => {\n  const months = (num(p['Years in Position']) || 0) * 12 + (num(p['Months in Position']) || 0);\n  return {\n    id: p['Linkedin URL Unique ID'] || p['Linkedin URL Public'] || p['Full Name'],\n    first_name: p['First Name'] || '', name: p['Full Name'] || '',\n    email: p['Email'] || '', email_status: p['Email Status'] || 'not found',\n    email_check: domainNote(p['Email'] || '', p['Company Domain']),\n    title: String(p['Current Job'] || '').trim(), company: p['Company Name'] || '',\n    industry: p['Company Industry'] || '', employees: num(p['Company Employee Exact Count']),\n    company_growth_1y_pct: num(p['Company Employee Growth 1 Year (%)']), sales_team: num(p['Sales Team Size']),\n    months_in_role: months,\n    new_in_role: ['true', 'yes', '1'].includes(String(p['Has New Position']).toLowerCase()) || months < 6,\n    headline: words(p['Profile Headline']), summary: words(p['Profile Summary']).slice(0, 700),\n    company_description: words(p['Company Description']).slice(0, 400),\n  };\n});\nreturn [{ json: { leads } }];\n"
+      },
+      "id": "952b3a4d-75e2-4f8f-a450-d594e9eadfda",
+      "name": "Lead facts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($json.leads) }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=You are an SDR. For each lead in the JSON you are given, score the fit against the ICP below from 1 to 5 and give the reason in one line, from the facts only. For every lead with a score of 3 or more, write a two-email sequence for the offer below. Use only the facts in the JSON and the offer: never invent a customer, a number or a result.\n\nReturn {id, score, reason} for every lead, plus {hook, subject, body, followup} for a fit, or skip: true when the lead has no email, an email_status other than safe, or an email_check that says \"do not send\".\nEmail 1: subject of 60 characters at most, lower case, about them. Body of 40 to 110 words: \"Hi <first name>,\" then one short paragraph on them, one on the offer, one line for a low-effort ask; paragraphs separated by a blank line. One real hook, named in \"hook\": a new role, company growth (always \"in a year\"), the size of the sales team, or one concrete line of their own headline or summary.\nFollow-up (sent 3 days later in the same thread if there is no reply): 20 to 70 words, starts with \"Hi <first name>,\", gives one new angle, never repeats a sentence of email 1, never \"just following up\".\nNo link, no template phrases (\"hope this finds you\", \"quick question\"), and vary the first line across the emails.\n\nICP:\n{{ $('Your settings').first().json.icp }}\n\nOffer:\n{{ $('Your settings').first().json.offer }}",
+          "maxIterations": 3
+        }
+      },
+      "id": "a0d3cc41-0d69-42e2-a9c5-77f5cd78491c",
+      "name": "Qualify and write",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "claude-sonnet-5-5",
+          "cachedResultName": "claude-sonnet-5-5"
+        },
+        "options": {
+          "maxTokensToSample": 16000
+        }
+      },
+      "id": "6adda513-727f-4353-92ac-310c4009a2f2",
+      "name": "Claude",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        640,
+        220
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "",
+          "name": "Anthropic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"required\": [\n    \"leads\"\n  ],\n  \"properties\": {\n    \"leads\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"required\": [\n          \"id\",\n          \"score\",\n          \"reason\"\n        ],\n        \"properties\": {\n          \"id\": {\n            \"type\": \"string\"\n          },\n          \"score\": {\n            \"type\": \"integer\"\n          },\n          \"reason\": {\n            \"type\": \"string\"\n          },\n          \"hook\": {\n            \"type\": \"string\"\n          },\n          \"subject\": {\n            \"type\": \"string\"\n          },\n          \"body\": {\n            \"type\": \"string\"\n          },\n          \"followup\": {\n            \"type\": \"string\"\n          },\n          \"skip\": {\n            \"type\": \"boolean\"\n          }\n        }\n      }\n    }\n  }\n}"
+      },
+      "id": "d8e1e566-0b28-435d-ace5-6967f71098b4",
+      "name": "Decisions",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        800,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Same checks as sdr.py check, then best fit first and the daily cap.\nconst leads = $('Lead facts').first().json.leads;\nconst cap = Number($('Your settings').first().json.daily_cap) || 20;\nconst out = Object.fromEntries($json.output.leads.map(e => [e.id, e]));\nconst n = s => String(s || '').split(/\\s+/).filter(Boolean).length;\nconst CLICHES = ['hope this finds you', 'quick question', 'just checking in', 'just following up', 'circle back', 'game-changer'];\nconst rows = leads.map(l => {\n  const e = out[l.id] || { score: 0, reason: 'no decision returned' };\n  const fit = (e.score || 0) >= 3 && !e.skip;\n  const first = String(l.first_name).split(/[\\s-]/)[0].toLowerCase();\n  const text = ((e.body || '') + ' ' + (e.followup || '')).toLowerCase();\n  const bad = fit && (!e.hook || !e.subject || e.subject.length > 60 || n(e.body) < 40 || n(e.body) > 110\n    || n(e.followup) < 20 || n(e.followup) > 70 || /https?:\\/\\/|www\\./.test(text)\n    || !String(e.body).toLowerCase().startsWith('hi ' + first) || CLICHES.some(c => text.includes(c)));\n  const ok = fit && !bad && l.email_status === 'safe' && !l.email_check.includes('do not send');\n  return { score: e.score || 0, ok, json: {\n    'Name': l.name, 'Title': l.title, 'Company': l.company, 'Fit (1-5)': e.score || '',\n    'Why': bad ? 'The sequence failed the checks. ' + (e.reason || '') : (e.reason || ''),\n    'Email': l.email, 'Email status': l.email_status, 'Email check': l.email_check,\n    'Hook': ok ? e.hook : '', 'Subject': ok ? e.subject : '', 'Email 1': ok ? e.body : '',\n    'Follow-up': ok ? e.followup : '', 'Send (yes/no)': '',\n  } };\n});\nrows.sort((a, b) => b.score - a.score);\nlet written = 0;\nfor (const r of rows) if (r.ok && ++written > cap) r.json['Why'] = `Over today's cap of ${cap}: next run. ` + r.json['Why'];\nreturn rows.map(r => ({ json: r.json }));\n"
+      },
+      "id": "93ac07f6-eb72-44da-b956-4ab80719653e",
+      "name": "Check, rank and cap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Your settings').first().json.sheet_url }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Your settings').first().json.sheet_url }}"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "1081f2f0-e70d-490d-8b24-610528864c2c",
+      "name": "Add to the approval sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1220,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "formTitle": "Load the approved sequences",
+        "formDescription": "Write yes in Send for the rows to load, then submit. Only safe emails are loaded, and nobody who is already in a campaign. Nothing is sent: you launch the campaign in Instantly.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "I have read the sequences marked yes",
+              "fieldType": "checkbox",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Yes"
+                  }
+                ]
+              },
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "733bbed1-62ae-4bca-a1ec-2ee83ab4317e",
+      "name": "Load approved rows",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d185c575-4e38-4314-921b-e1cc2a9d60c1",
+              "name": "daily_cap",
+              "type": "string",
+              "value": "20"
+            },
+            {
+              "id": "d81d6506-0fa4-4939-8a02-46fb70311ac8",
+              "name": "sheet_url",
+              "type": "string",
+              "value": "PASTE_YOUR_GOOGLE_SHEET_URL_WITH_GID"
+            },
+            {
+              "id": "8e0902a3-0e3a-487c-8e93-3f8d84bd9997",
+              "name": "instantly_campaign_id",
+              "type": "string",
+              "value": "PASTE_YOUR_CAMPAIGN_ID"
+            },
+            {
+              "id": "fff2d743-1db3-4c60-bd7d-40e0bf576f74",
+              "name": "icp",
+              "type": "string",
+              "value": "Size first: a company over 1,000 employees is a 2, whatever the role. Fit 5: VP Sales, Head of Sales, CRO, Head of SDRs or RevOps at a B2B software company of 50 to 1,000 employees with 10+ sellers or 20%+ growth in a year. 4: same role, 3 to 9 sellers, or B2B not software. 3: under 50 employees, commercial operations, or a business unit under 1,000 inside a larger group. 2: over 1,000 employees, partnerships, B2C. 1: M&A, investors, fractional or consulting roles, founders of under 10 people."
+            },
+            {
+              "id": "3a40e587-dc61-4fab-a729-606bc0acc293",
+              "name": "offer",
+              "type": "string",
+              "value": "Evaboot exports a LinkedIn Sales Navigator search to a clean spreadsheet with verified professional emails; a saved search can export the new leads every week. For sales leaders who build prospect lists. Ask: a low-effort question such as 'Worth a look?'"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "1701dc23-e293-4558-a77b-d048153b8a78",
+      "name": "Approval settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.instantly.ai/api/v2/campaigns/{{ $json.instantly_campaign_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "f093dd6e-d276-4abc-ad04-b5a84841d5f7",
+      "name": "Read the campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Instantly API key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// sdr.py campaign_ok: refuse a campaign that would keep emailing a person who answered.\nconst c = $json, steps = JSON.stringify(((c.sequences || [])[0] || {}).steps || []);\nconst problems = [];\nif (c.stop_on_reply !== true) problems.push('stop on reply is off');\nfor (const v of ['{{ai_subject}}', '{{personalization}}', '{{ai_followup}}'])\n  if (!steps.includes(v)) problems.push(`no ${v} in the sequence`);\nif (problems.length) throw new Error(`Fix the Instantly campaign first (${problems.join(', ')}). Nothing was loaded.`);\nreturn [{ json: { campaign: c.name } }];\n"
+      },
+      "id": "c9ff69ee-9ed7-44ec-b70d-58b400b10a07",
+      "name": "Stops on reply?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Approval settings').first().json.sheet_url }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Approval settings').first().json.sheet_url }}"
+        },
+        "options": {}
+      },
+      "id": "10f5cfa4-4da2-409e-ac67-220b943f904f",
+      "name": "Read the sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        880,
+        400
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Rows you marked yes, with a safe email that is not on a link site.\nreturn $input.all().filter(r => String(r.json['Send (yes/no)']).trim().toLowerCase() === 'yes'\n  && r.json['Email 1'] && r.json['Email status'] === 'safe' && !String(r.json['Email check']).includes('do not send'));\n"
+      },
+      "id": "39bc40ad-073e-494f-acd5-5e1125761baa",
+      "name": "Approved rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.instantly.ai/api/v2/leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ campaign: $('Approval settings').first().json.instantly_campaign_id, email: $json.Email, first_name: $json.Name.split(' ')[0], last_name: $json.Name.split(' ').slice(1).join(' '), company_name: $json.Company, personalization: $json['Email 1'], custom_variables: { ai_subject: $json.Subject, ai_followup: $json['Follow-up'] }, skip_if_in_campaign: true }) }}",
+        "options": {}
+      },
+      "id": "e6e6bdf1-9f73-431d-bd53-244f24807fcf",
+      "name": "Add to Instantly",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Instantly API key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Instantly answers with the existing lead when the person is already in another campaign.\nconst mine = $('Approval settings').first().json.instantly_campaign_id;\nconst rows = $('Approved rows').all();\nconst added = [], skipped = [];\n$input.all().forEach((r, i) => (r.json.campaign === mine ? added : skipped).push(rows[i].json['Name']));\nreturn [{ json: { added: added.length, skipped_already_in_a_campaign: skipped } }];\n"
+      },
+      "id": "56cd0164-8eac-4cbd-a69d-39e800b94f10",
+      "name": "Added or skipped",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Sequences loaded",
+        "completionMessage": "={{ $json.added }} added to your Instantly campaign. Already in a campaign, so skipped: {{ $json.skipped_already_in_a_campaign.join(', ') || 'nobody' }}. Preview a few leads, then launch the campaign when you are ready.",
+        "options": {}
+      },
+      "id": "9aeeef45-f30f-4740-b36c-27965989137c",
+      "name": "Loaded",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.3,
+      "position": [
+        1760,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "New leads from Evaboot": {
+      "main": [
+        [
+          {
+            "node": "Your settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Your settings": {
+      "main": [
+        [
+          {
+            "node": "Lead facts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead facts": {
+      "main": [
+        [
+          {
+            "node": "Qualify and write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualify and write": {
+      "main": [
+        [
+          {
+            "node": "Check, rank and cap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check, rank and cap": {
+      "main": [
+        [
+          {
+            "node": "Add to the approval sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load approved rows": {
+      "main": [
+        [
+          {
+            "node": "Approval settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval settings": {
+      "main": [
+        [
+          {
+            "node": "Read the campaign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the campaign": {
+      "main": [
+        [
+          {
+            "node": "Stops on reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stops on reply?": {
+      "main": [
+        [
+          {
+            "node": "Read the sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the sheet": {
+      "main": [
+        [
+          {
+            "node": "Approved rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved rows": {
+      "main": [
+        [
+          {
+            "node": "Add to Instantly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add to Instantly": {
+      "main": [
+        [
+          {
+            "node": "Added or skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Added or skipped": {
+      "main": [
+        [
+          {
+            "node": "Loaded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Qualify and write",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decisions": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Qualify and write",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

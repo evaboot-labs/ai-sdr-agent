@@ -1,0 +1,13 @@
+{
+  "name": "ai-sdr-agent",
+  "version": "1.0.0",
+  "description": "Find leads with a buying signal, qualify them against your ICP, write a checked two-email sequence, and load the approved ones into an Instantly campaign that stops on reply.",
+  "author": { "name": "Evaboot", "url": "https://evaboot.com" },
+  "homepage": "https://evaboot.com/blog/what-is-an-ai-sdr",
+  "repository": "https://github.com/evaboot-labs/ai-sdr-agent",
+  "license": "MIT",
+  "privacyPolicyUrl": "https://evaboot.com/privacy-policy",
+  "keywords": ["ai-sdr", "ai-agent", "cold-email", "instantly", "sales-navigator", "evaboot", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}
