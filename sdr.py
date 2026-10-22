@@ -21,12 +21,14 @@ SUBJECT_MAX = 60          # characters
 BODY_WORDS = (40, 110)    # the first email
 FOLLOWUP_WORDS = (20, 70)  # the second email, sent in the same thread if there is no reply
 SCORES = range(1, 6)      # fit: 5 = exactly the ICP, 3 = worth a try, 1-2 = do not contact
-# Phrases that mark an email as a template. Extend the list in ICP.md if you have your own.
+# Phrases that mark an email as a template. Add your own to this list.
 CLICHES = ["hope this finds you", "i hope you're well", "just checking in", "quick question", "touch base",
            "circle back", "synergy", "game-changer", "revolutionize", "i came across your profile",
            "just following up", "bumping this", "floating this", "any thoughts on my last email"]
 SEND_STATUSES = {"safe"}  # only verified emails are pushed; "riskier" can bounce
 LINK_DOMAINS = {"linktr.ee", "bit.ly", "beacons.ai", "lnk.bio", "linkin.bio", "carrd.co", "about.me"}
+LINK = re.compile(r"https?://|www\.|\b[a-z0-9-]+\.(com|io|ai|co|net|org|app|dev|ee)\b", re.I)
+CAP_NOTE = "Over today's cap"
 
 
 def domain_note(email, company_domain):
@@ -53,7 +55,8 @@ def facts(path):
     """export.json = the Evaboot export (get_export or the API). One entry per lead, only real fields."""
     out = []
     for p in json.load(open(path)).get("prospects") or []:
-        months = (num(p.get("Years in Position")) or 0) * 12 + (num(p.get("Months in Position")) or 0)
+        years, mons = num(p.get("Years in Position")), num(p.get("Months in Position"))
+        months = None if years is None and mons is None else (years or 0) * 12 + (mons or 0)
         out.append({
             "id": p.get("Linkedin URL Unique ID") or p.get("Linkedin URL Public") or p.get("Full Name"),
             "first_name": p.get("First Name") or "",
@@ -69,7 +72,8 @@ def facts(path):
             "company_growth_1y_pct": num(p.get("Company Employee Growth 1 Year (%)")),
             "sales_team": num(p.get("Sales Team Size")),
             "months_in_role": months,
-            "new_in_role": str(p.get("Has New Position")).lower() in ("true", "yes", "1") or months < 6,
+            "new_in_role": str(p.get("Has New Position")).lower() in ("true", "yes", "1")
+                           or (months is not None and months < 6),
             "headline": " ".join((p.get("Profile Headline") or "").split()),
             "summary": " ".join((p.get("Profile Summary") or "").split())[:700],
             "company_description": " ".join((p.get("Company Description") or "").split())[:400],
@@ -88,9 +92,9 @@ def check(facts_path, sdr_path):
     entries = json.load(open(sdr_path))
     problems, openings = [], {}
     for e in entries:
-        lead = leads.get(e["id"])
+        lead = leads.get(e.get("id"))
         if not lead:
-            problems.append(f"unknown lead {e['id']}")
+            problems.append(f"unknown lead {e.get('id')}")
             continue
         who = lead["name"]
         if e.get("score") not in SCORES or not e.get("reason"):
@@ -107,19 +111,22 @@ def check(facts_path, sdr_path):
             problems.append(f"{who}: no hook named")
         if not subject or len(subject) > SUBJECT_MAX:
             problems.append(f"{who}: subject empty or over {SUBJECT_MAX} characters")
+        elif subject != subject.lower():
+            problems.append(f"{who}: write the subject in lower case")
         if not BODY_WORDS[0] <= words(body) <= BODY_WORDS[1]:
             problems.append(f"{who}: email is {words(body)} words, keep it between {BODY_WORDS[0]} and {BODY_WORDS[1]}")
         if not FOLLOWUP_WORDS[0] <= words(follow) <= FOLLOWUP_WORDS[1]:
             problems.append(f"{who}: follow-up is {words(follow)} words, keep it between "
                             f"{FOLLOWUP_WORDS[0]} and {FOLLOWUP_WORDS[1]}")
         for label, text in (("email", body), ("follow-up", follow)):
-            if re.search(r"https?://|www\.", text):
-                problems.append(f"{who}: a link in the {label} hurts deliverability")
+            if LINK.search(text):
+                problems.append(f"{who}: a link or a domain in the {label} hurts deliverability")
+            plain = text.lower().replace("\u2019", "'")
             for c in CLICHES:
-                if c in text.lower():
+                if c in plain:
                     problems.append(f'{who}: template phrase "{c}" in the {label}')
         first = re.split(r"[\s-]", lead["first_name"].strip())[0].lower()  # "Cristian-Daniel" -> "cristian"
-        if not body.lower().startswith(f"hi {first}"):
+        if not first or not re.match(rf"hi {re.escape(first)}\b", body.lower()):
             problems.append(f"{who}: open the email with the first name")
         long_sentences = [x.strip() for x in re.split(r"[.?!\n]", body) if words(x) >= 8]
         if any(x.lower() in follow.lower() for x in long_sentences):
@@ -130,7 +137,7 @@ def check(facts_path, sdr_path):
     for o, c in openings.items():
         if written >= 6 and c > written / 3:
             problems.append(f'{c} of {written} emails open the same way ("{o}..."): vary it')
-    missing = set(leads) - {e["id"] for e in entries}
+    missing = set(leads) - {e.get("id") for e in entries}
     problems += [f"no decision for {leads[i]['name']}" for i in missing]
     for p in problems:
         print("FAIL", p)
@@ -155,7 +162,7 @@ def sheet(facts_path, sdr_path, cap):
         if ready:
             written += 1
             if written > cap:
-                why = f"Over today's cap of {cap}: next run. " + why
+                why = f"{CAP_NOTE} of {cap}: next run. " + why
         w.writerow([f["name"], f["title"], f["company"], e.get("score", ""), why, f["email"], f["email_status"],
                     f.get("email_check", ""), e.get("hook", "") if ready else "",
                     e.get("subject", "") if ready else "", e.get("body", "") if ready else "",
@@ -184,6 +191,8 @@ def campaign_ok(campaign):
     problems = []
     if c.get("stop_on_reply") is not True:
         problems.append("stop on reply is off")
+    if c.get("stop_for_company") is not True:
+        problems.append("stop for the company on reply is off")
     steps = (c.get("sequences") or [{}])[0].get("steps") or []
     texts = json.dumps(steps)
     for var in ("{{ai_subject}}", "{{personalization}}", "{{ai_followup}}"):
@@ -201,12 +210,19 @@ def push(queue_path, campaign, send):
         sys.exit("fix the campaign first: nothing was pushed")
     rows = [r for r in csv.DictReader(open(queue_path))
             if r["Send (yes/no)"].strip().lower() == "yes" and r["Email 1"]]
+    for r in [r for r in rows if r["Why"].startswith(CAP_NOTE)]:
+        print(f"skip {r['Name']}: over today's cap, it waits for the next run")
+        rows.remove(r)
     ready = [r for r in rows if r["Email status"] in SEND_STATUSES and r["Email"]
              and "do not send" not in r.get("Email check", "")]
     for r in rows:
         if r not in ready:
             print(f"skip {r['Name']}: {r.get('Email check') or 'email status ' + (r['Email status'] or 'missing')}")
     added = 0
+    already = set()
+    if send:  # people loaded by an earlier run of this push
+        already = {x["email"].lower() for x in instantly("POST", "/leads/list", {"campaign": campaign, "limit": 100})
+                   .get("items", [])}
     for r in ready:
         first, _, last = r["Name"].partition(" ")
         lead = {"campaign": campaign, "email": r["Email"], "first_name": first, "last_name": last,
@@ -215,6 +231,9 @@ def push(queue_path, campaign, send):
                 "skip_if_in_campaign": True}
         if not send:
             print(f"dry run: {r['Name']} <{r['Email']}>")
+            continue
+        if r["Email"].lower() in already:
+            print(f"skip {r['Name']}: already in this campaign")
             continue
         # Instantly answers 200 with the existing lead when the person is already in a campaign.
         other = instantly("POST", "/leads", lead).get("campaign")

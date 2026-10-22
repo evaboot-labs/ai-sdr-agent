@@ -29,7 +29,8 @@ You do the Sales Navigator and Evaboot work through the Evaboot MCP server (`htt
 1. Call `build_sn_search_from_prompt` with **people only**: the ICP's titles and geography, plus the signal ("changed jobs in the last 90 days"). Never put an industry or a company size in this request: that starts a company-first crawl.
 2. Poll `get_search_build`, then add the industry and size filters to the URL yourself (`INDUSTRY` and `COMPANY_HEADCOUNT`, as the account's other searches use them).
 3. Call `search_sn_leads` on the URL with `count: 25`. It is free. Show the total and the first titles and companies. Tighten the search if the list is noisy.
-4. On a yes, call `export_sn_search_or_list` with `max_results` (the daily cap, or a little more), poll `get_export` until `EXECUTED`, and save the JSON to `data/export.json`.
+4. On a yes, call `export_sn_search_or_list` with `max_results` (the daily cap, or a little more), and poll `get_export` with `limit: 0` until `EXECUTED`.
+5. Save the leads to `data/export.json` with the Evaboot API (the key is in `.env`): `set -a; . ./.env; set +a; curl -s -H "Authorization: Bearer $EVABOOT_API_KEY" https://api.evaboot.com/v1/extractions/<extraction_id>/ > data/export.json`
 
 ```bash
 python3 sdr.py facts data/export.json > queue/facts.json
@@ -61,8 +62,8 @@ python3 sdr.py sheet queue/facts.json queue/sdr.json --max 20 > queue/queue.csv
 ## Step 4: load the approved sequences into Instantly
 
 1. The campaign needs two steps (`{{ai_subject}}` / `{{personalization}}`, then `{{ai_followup}}`) and stop on reply on, as in `docs/instantly.md`. Ask for its id.
-2. Dry run: `python3 sdr.py push queue/queue.csv --campaign <id>`. It refuses a campaign without stop on reply or without the three variables.
-3. On a yes: `python3 sdr.py push queue/queue.csv --campaign <id> --send`. A person who is already in another campaign is skipped and named.
+2. Load the keys into the shell (`set -a; . ./.env; set +a`), then dry run: `python3 sdr.py push queue/queue.csv --campaign <id>`. It refuses a campaign without stop on reply, without stop for the company, or without the three variables, and it skips rows over the daily cap.
+3. On a yes: `python3 sdr.py push queue/queue.csv --campaign <id> --send`. A person who is already in this campaign or in another one is skipped and named.
 4. Ask the user to open the campaign, preview two or three leads, attach their sending accounts and launch it themselves.
 
 ## Step 5: every week

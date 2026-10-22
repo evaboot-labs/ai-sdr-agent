@@ -7,9 +7,9 @@
 1. **New leads from Evaboot** (Webhook): each run of your recurring export posts its new leads here.
 2. **Lead facts** (Code): the same facts and email-domain check as `sdr.py`.
 3. **Qualify and write** (AI Agent with Claude): a 1-to-5 score and a reason for every lead, and a first email and a follow-up for each fit, by the ICP and offer in Your settings.
-4. **Check, rank and cap** (Code): the same checks as `sdr.py check`, best fit first, and the daily cap.
+4. **Check, rank and cap** (Code): the main checks of `sdr.py check` (lengths, links and domains, the first name, lower-case subject, template phrases), best fit first, and the daily cap. A sequence that fails is removed and its row says why.
 5. **Add to the approval sheet** (Google Sheets).
-6. **Load approved rows** (form): **Read the campaign** and stop if it does not stop on reply, **Read the sheet**, keep the rows marked `yes` with a `safe` email, **Add to Instantly**, and report who was skipped because they are already in a campaign.
+6. **Load approved rows** (form): **Read the campaign** and stop if it does not stop on reply and for the company, **Read the sheet**, keep the rows marked `yes` with a `safe` email and under the cap, **Add to Instantly**, and report who was skipped because they are already in another campaign.
 
 ## Set it up
 

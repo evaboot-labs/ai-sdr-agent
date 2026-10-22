@@ -98,15 +98,18 @@ const leads = $('Lead facts').first().json.leads;
 const cap = Number($('Your settings').first().json.daily_cap) || 20;
 const out = Object.fromEntries($json.output.leads.map(e => [e.id, e]));
 const n = s => String(s || '').split(/\s+/).filter(Boolean).length;
-const CLICHES = ['hope this finds you', 'quick question', 'just checking in', 'just following up', 'circle back', 'game-changer'];
+const CLICHES = ['hope this finds you', "i hope you're well", 'just checking in', 'quick question', 'touch base', 'circle back',
+  'synergy', 'game-changer', 'revolutionize', 'i came across your profile', 'just following up', 'bumping this',
+  'floating this', 'any thoughts on my last email'];
+const LINK = /https?:\/\/|www\.|\b[a-z0-9-]+\.(com|io|ai|co|net|org|app|dev|ee)\b/i;
 const rows = leads.map(l => {
   const e = out[l.id] || { score: 0, reason: 'no decision returned' };
   const fit = (e.score || 0) >= 3 && !e.skip;
   const first = String(l.first_name).split(/[\s-]/)[0].toLowerCase();
-  const text = ((e.body || '') + ' ' + (e.followup || '')).toLowerCase();
-  const bad = fit && (!e.hook || !e.subject || e.subject.length > 60 || n(e.body) < 40 || n(e.body) > 110
-    || n(e.followup) < 20 || n(e.followup) > 70 || /https?:\/\/|www\./.test(text)
-    || !String(e.body).toLowerCase().startsWith('hi ' + first) || CLICHES.some(c => text.includes(c)));
+  const text = ((e.body || '') + ' ' + (e.followup || '')).toLowerCase().replace(/\u2019/g, "'");
+  const bad = fit && (!e.hook || !e.subject || e.subject.length > 60 || e.subject !== e.subject.toLowerCase()
+    || n(e.body) < 40 || n(e.body) > 110 || n(e.followup) < 20 || n(e.followup) > 70 || LINK.test(text)
+    || !first || !new RegExp('^hi ' + first + '\\b').test(String(e.body).toLowerCase()) || CLICHES.some(c => text.includes(c)));
   const ok = fit && !bad && l.email_status === 'safe' && !l.email_check.includes('do not send');
   return { score: e.score || 0, ok, json: {
     'Name': l.name, 'Title': l.title, 'Company': l.company, 'Fit (1-5)': e.score || '',
@@ -127,6 +130,7 @@ GUARD_JS = r"""
 const c = $json, steps = JSON.stringify(((c.sequences || [])[0] || {}).steps || []);
 const problems = [];
 if (c.stop_on_reply !== true) problems.push('stop on reply is off');
+if (c.stop_for_company !== true) problems.push('stop for the company on reply is off');
 for (const v of ['{{ai_subject}}', '{{personalization}}', '{{ai_followup}}'])
   if (!steps.includes(v)) problems.push(`no ${v} in the sequence`);
 if (problems.length) throw new Error(`Fix the Instantly campaign first (${problems.join(', ')}). Nothing was loaded.`);
@@ -134,9 +138,12 @@ return [{ json: { campaign: c.name } }];
 """
 
 APPROVED_JS = r"""
-// Rows you marked yes, with a safe email that is not on a link site.
-return $input.all().filter(r => String(r.json['Send (yes/no)']).trim().toLowerCase() === 'yes'
-  && r.json['Email 1'] && r.json['Email status'] === 'safe' && !String(r.json['Email check']).includes('do not send'));
+// Rows you marked yes, under today's cap, with a safe email that is not on a link site.
+const rows = $input.all().filter(r => String(r.json['Send (yes/no)']).trim().toLowerCase() === 'yes'
+  && r.json['Email 1'] && r.json['Email status'] === 'safe' && !String(r.json['Email check']).includes('do not send')
+  && !String(r.json['Why']).startsWith("Over today's cap"));
+if (!rows.length) throw new Error('No row is marked yes with a safe email: nothing to load.');
+return rows;
 """
 
 RESULT_JS = r"""
@@ -228,7 +235,7 @@ node("Add to Instantly", "n8n-nodes-base.httpRequest", 4.2, {
 code("Added or skipped", RESULT_JS, [1540, 400])
 node("Loaded", "n8n-nodes-base.form", 2.3, {
     "operation": "completion", "completionTitle": "Sequences loaded",
-    "completionMessage": "={{ $json.added }} added to your Instantly campaign. Already in a campaign, so skipped: "
+    "completionMessage": "={{ $json.added }} in your Instantly campaign. Already in another campaign, so skipped: "
                          "{{ $json.skipped_already_in_a_campaign.join(', ') || 'nobody' }}. Preview a few leads, "
                          "then launch the campaign when you are ready.",
     "options": {}}, [1760, 400])

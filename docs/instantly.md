@@ -6,10 +6,10 @@ The agent adds each approved lead to an Instantly campaign with three fields: th
 2. In **Sequences**:
    - Step 1: subject `{{ai_subject}}`, body `{{personalization}}`. Nothing else: the AI wrote the whole email.
    - Step 2, 3 days later: leave the subject empty (it goes in the same thread) and set the body to `{{ai_followup}}`.
-3. In **Options**, turn on **Stop sending emails on reply** and **Stop campaign for company on reply**. `sdr.py push` refuses a campaign without stop on reply.
+3. In **Options**, turn on **Stop sending emails on reply** and **Stop campaign for company on reply**. `sdr.py push` refuses a campaign without both.
 4. Set a **daily limit** that matches the cap in `ICP.md`.
 5. Copy the campaign id from the address bar (`app.instantly.ai/app/campaign/<id>/...`).
-6. Put your Instantly API key in `.env` as `INSTANTLY_API_KEY` (Settings > Integrations > API keys, API v2).
+6. Put your Instantly API key in `.env` as `INSTANTLY_API_KEY` (Settings > Integrations > API keys, API v2), and load it into your shell before a push: `set -a; . ./.env; set +a`.
 7. Run the dry run, then the push with `--send` (see the skill, step 4).
 8. Open the campaign, preview a few leads to read the real emails, attach your sending accounts, and launch.
 
