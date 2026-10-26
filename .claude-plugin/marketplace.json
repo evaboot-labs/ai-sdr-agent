@@ -1,0 +1,14 @@
+{
+  "name": "evaboot-labs-ai-sdr-agent",
+  "owner": { "name": "Evaboot", "url": "https://evaboot.com" },
+  "metadata": {
+    "description": "An AI SDR that finds new sales leaders in Sales Navigator, qualifies each one against your ICP, writes a two-email sequence for the ones that fit, and loads the ones you approve into Instantly."
+  },
+  "plugins": [
+    {
+      "name": "ai-sdr-agent",
+      "source": "./",
+      "description": "Find leads with a buying signal, qualify them against your ICP, write a checked two-email sequence, and load the approved ones into an Instantly campaign that stops on reply."
+    }
+  ]
+}
