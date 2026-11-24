@@ -203,6 +203,22 @@ def campaign_ok(campaign):
     return not problems
 
 
+def campaign_emails(campaign):
+    """Every email already in the campaign. /leads/list returns at most 100 leads a page,
+    so follow next_starting_after until the last page."""
+    emails, after = set(), None
+    while True:
+        body = {"campaign": campaign, "limit": 100}
+        if after:
+            body["starting_after"] = after
+        page = instantly("POST", "/leads/list", body)
+        items = page.get("items") or []
+        emails |= {x["email"].lower() for x in items if x.get("email")}
+        after = page.get("next_starting_after")
+        if not after or not items:
+            return emails
+
+
 def push(queue_path, campaign, send):
     """Rows marked yes, with a safe email, go to the campaign as leads: the first email in
     `personalization`, the subject in `ai_subject` and the follow-up in `ai_followup`."""
@@ -221,8 +237,7 @@ def push(queue_path, campaign, send):
     added = 0
     already = set()
     if send:  # people loaded by an earlier run of this push
-        already = {x["email"].lower() for x in instantly("POST", "/leads/list", {"campaign": campaign, "limit": 100})
-                   .get("items", [])}
+        already = campaign_emails(campaign)
     for r in ready:
         first, _, last = r["Name"].partition(" ")
         lead = {"campaign": campaign, "email": r["Email"], "first_name": first, "last_name": last,
